@@ -3,6 +3,7 @@ from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
 import uuid
 
 
@@ -302,6 +303,11 @@ class Product(models.Model):
         verbose_name=_('Всего заказано')
     )
     
+    total_views = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_('Количество просмотров')
+    )
+    
     # Даты
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -332,6 +338,8 @@ class Product(models.Model):
             models.Index(fields=['in_stock']),
             models.Index(fields=['price']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['total_ordered']),
+            models.Index(fields=['rating']),
         ]
     
     def __str__(self):
@@ -347,6 +355,32 @@ class Product(models.Model):
             self.published_at = timezone.now()
         
         super().save(*args, **kwargs)
+    
+    def clean(self):
+        """Валидация модели"""
+        super().clean()
+        
+        # Проверка цен
+        if self.old_price and self.old_price <= self.price:
+            raise ValidationError({
+                'old_price': _('Старая цена должна быть больше текущей цены')
+            })
+        
+        if self.cost_price and self.cost_price >= self.price:
+            raise ValidationError({
+                'cost_price': _('Себестоимость должна быть меньше розничной цены')
+            })
+        
+        # Проверка количества заказа
+        if self.max_order_quantity and self.min_order_quantity > self.max_order_quantity:
+            raise ValidationError({
+                'min_order_quantity': _('Минимальное количество не может превышать максимальное')
+            })
+        
+        if self.step_quantity < 1:
+            raise ValidationError({
+                'step_quantity': _('Шаг количества должен быть больше 0')
+            })
     
     @property
     def available_quantity(self):
@@ -387,7 +421,7 @@ class Product(models.Model):
             raise ValueError(f'Недостаточно товара. Доступно: {self.available_quantity}')
         
         self.reserved_quantity += quantity
-        self.save()
+        self.save(update_fields=['reserved_quantity'])
     
     def release_quantity(self, quantity):
         """
@@ -397,7 +431,7 @@ class Product(models.Model):
             raise ValueError(f'Нельзя освободить больше, чем зарезервировано')
         
         self.reserved_quantity -= quantity
-        self.save()
+        self.save(update_fields=['reserved_quantity'])
     
     def update_stock(self, quantity):
         """
@@ -406,13 +440,16 @@ class Product(models.Model):
         if quantity < 0:
             raise ValueError('Количество не может быть отрицательным')
         
+        old_quantity = self.stock_quantity
         self.stock_quantity = quantity
-        if self.stock_quantity == 0:
-            self.in_stock = False
-        else:
-            self.in_stock = True
+        self.in_stock = quantity > 0
         
-        self.save()
+        self.save(update_fields=['stock_quantity', 'in_stock'])
+    
+    def increment_views(self):
+        """Увеличить счетчик просмотров"""
+        self.total_views += 1
+        self.save(update_fields=['total_views'])
     
     def get_related_products(self, limit=4):
         """
@@ -423,6 +460,347 @@ class Product(models.Model):
             status=Product.ProductStatus.ACTIVE,
             in_stock=True
         ).exclude(id=self.id).order_by('?')[:limit]
+    
+    def get_absolute_url(self):
+        """Получить URL товара"""
+        from django.urls import reverse
+        return reverse('products:product-detail', kwargs={'slug': self.slug})
+
+
+class ProductSpecification(models.Model):
+    """
+    Детальная спецификация товара.
+    Отдельная модель для расширенной информации о товаре.
+    """
+    product = models.OneToOneField(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='specification',
+        verbose_name=_('Товар')
+    )
+    
+    brand = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Бренд'),
+        help_text=_('Производитель или бренд товара')
+    )
+    
+    manufacturer = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Производитель'),
+        help_text=_('Название компании-производителя')
+    )
+    
+    country_of_origin = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Страна производства'),
+        help_text=_('Страна, где произведен товар')
+    )
+    
+    warranty = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Гарантия'),
+        help_text=_('Срок гарантии (например: "1 год", "24 месяца")')
+    )
+
+    weight_netto = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        verbose_name=_('Вес нетто (кг)'),
+        help_text=_('Вес товара без упаковки')
+    )
+    
+    weight_brutto = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        verbose_name=_('Вес брутто (кг)'),
+        help_text=_('Вес товара с упаковкой')
+    )
+    
+    length = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_('Длина (см)')
+    )
+    
+    width = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_('Ширина (см)')
+    )
+    
+    height = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_('Высота (см)')
+    )
+    
+    material = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Материал'),
+        help_text=_('Основной материал изготовления')
+    )
+    
+    composition = models.TextField(
+        blank=True,
+        verbose_name=_('Состав'),
+        help_text=_('Детальный состав (для продуктов, тканей и т.д.)')
+    )
+    
+    color = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Цвет')
+    )
+
+    power = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_('Мощность'),
+        help_text=_('Например: "100 Вт", "2.2 кВт"')
+    )
+    
+    voltage = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_('Напряжение'),
+        help_text=_('Например: "220-240 В", "12 В"')
+    )
+    
+    frequency = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_('Частота'),
+        help_text=_('Например: "50 Гц"')
+    )
+    
+    energy_class = models.CharField(
+        max_length=10,
+        blank=True,
+        verbose_name=_('Класс энергопотребления'),
+        help_text=_('A++, A+, A, B, C, D, E, F, G')
+    )
+    
+    operating_temperature = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Рабочая температура'),
+        help_text=_('Диапазон рабочих температур')
+    )
+    
+    humidity_range = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Влажность эксплуатации'),
+        help_text=_('Диапазон допустимой влажности')
+    )
+    
+    ip_rating = models.CharField(
+        max_length=10,
+        blank=True,
+        verbose_name=_('Класс защиты (IP)'),
+        help_text=_('Например: IP44, IP67')
+    )
+    
+    package_contents = models.TextField(
+        blank=True,
+        verbose_name=_('Комплектация'),
+        help_text=_('Что входит в комплект поставки')
+    )
+    
+    accessories = models.TextField(
+        blank=True,
+        verbose_name=_('Аксессуары'),
+        help_text=_('Дополнительные аксессуары (опционально)')
+    )
+    
+    certification = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Сертификация'),
+        help_text=_('Сертификаты соответствия, EAC, CE, RoHS и т.д.')
+    )
+    
+    gost = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('ГОСТ'),
+        help_text=_('Соответствие государственным стандартам')
+    )
+    
+    shelf_life = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name=_('Срок годности'),
+        help_text=_('Срок годности или хранения')
+    )
+    
+    production_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name=_('Дата производства')
+    )
+    
+    expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name=_('Срок годности до')
+    )
+    
+    attributes = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_('Дополнительные характеристики'),
+        help_text=_('Специфические для категории характеристики в формате JSON')
+    )
+    
+    manual_file = models.FileField(
+        upload_to='products/manuals/%Y/%m/%d/',
+        null=True,
+        blank=True,
+        verbose_name=_('Инструкция (PDF)'),
+        help_text=_('Файл с инструкцией по эксплуатации')
+    )
+    
+    specification_file = models.FileField(
+        upload_to='products/specs/%Y/%m/%d/',
+        null=True,
+        blank=True,
+        verbose_name=_('Спецификация (PDF)'),
+        help_text=_('Файл с детальной спецификацией')
+    )
+    
+    drawing_file = models.FileField(
+        upload_to='products/drawings/%Y/%m/%d/',
+        null=True,
+        blank=True,
+        verbose_name=_('Чертеж (PDF/DWG)'),
+        help_text=_('Технический чертеж или схема')
+    )
+    
+    features = models.TextField(
+        blank=True,
+        verbose_name=_('Ключевые особенности'),
+        help_text=_='Список основных преимуществ, разделенных точкой с запятой'
+    )
+    
+    restrictions = models.TextField(
+        blank=True,
+        verbose_name=_('Ограничения'),
+        help_text=_='Ограничения по использованию, противопоказания'
+    )
+    
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name=_('Дата создания спецификации')
+    )
+    
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name=_('Дата обновления спецификации')
+    )
+    
+    class Meta:
+        verbose_name = _('Спецификация товара')
+        verbose_name_plural = _('Спецификации товаров')
+        indexes = [
+            models.Index(fields=['product']),
+            models.Index(fields=['brand']),
+            models.Index(fields=['country_of_origin']),
+        ]
+    
+    def __str__(self):
+        return f"Спецификация: {self.product.name}"
+    
+    def clean(self):
+        """Валидация модели"""
+        super().clean()
+        
+        # Проверка дат
+        if self.production_date and self.expiry_date:
+            if self.production_date >= self.expiry_date:
+                raise ValidationError({
+                    'expiry_date': _('Срок годности должен быть позже даты производства')
+                })
+        
+        # Проверка веса
+        if self.weight_netto and self.weight_brutto:
+            if self.weight_netto > self.weight_brutto:
+                raise ValidationError({
+                    'weight_netto': _('Вес нетто не может быть больше веса брутто')
+                })
+    
+    @property
+    def dimensions_text(self):
+        """Текстовое представление габаритов"""
+        dimensions = []
+        if self.length:
+            dimensions.append(f"{self.length} см")
+        if self.width:
+            dimensions.append(f"{self.width} см")
+        if self.height:
+            dimensions.append(f"{self.height} см")
+        
+        if len(dimensions) == 3:
+            return f"{dimensions[0]} x {dimensions[1]} x {dimensions[2]}"
+        elif dimensions:
+            return ", ".join(dimensions)
+        return ""
+    
+    @property
+    def weight_text(self):
+        """Текстовое представление веса"""
+        if self.weight_brutto:
+            return f"{self.weight_brutto} кг (брутто)"
+        elif self.weight_netto:
+            return f"{self.weight_netto} кг (нетто)"
+        return ""
+    
+    def get_features_list(self):
+        """Получить список особенностей"""
+        if self.features:
+            return [f.strip() for f in self.features.split(';') if f.strip()]
+        return []
+    
+    def to_dict(self):
+        """Преобразовать спецификацию в словарь (для API)"""
+        return {
+            'brand': self.brand,
+            'manufacturer': self.manufacturer,
+            'country_of_origin': self.country_of_origin,
+            'warranty': self.warranty,
+            'weight': self.weight_text,
+            'dimensions': self.dimensions_text,
+            'material': self.material,
+            'composition': self.composition,
+            'color': self.color,
+            'power': self.power,
+            'voltage': self.voltage,
+            'energy_class': self.energy_class,
+            'ip_rating': self.ip_rating,
+            'package_contents': self.package_contents,
+            'certification': self.certification,
+            'shelf_life': self.shelf_life,
+            'attributes': self.attributes,
+            'video_url': self.video_url,
+            'features': self.get_features_list(),
+        }
 
 
 class ProductImage(models.Model):
@@ -473,6 +851,9 @@ class ProductImage(models.Model):
         verbose_name = _('Изображение товара')
         verbose_name_plural = _('Изображения товаров')
         ordering = ['display_order', '-is_main', 'created_at']
+        indexes = [
+            models.Index(fields=['product', 'is_main']),
+        ]
     
     def __str__(self):
         return f"Изображение для {self.product.name}"
@@ -567,6 +948,11 @@ class ProductReview(models.Model):
         verbose_name_plural = _('Отзывы о товарах')
         ordering = ['-created_at']
         unique_together = ['product', 'user']
+        indexes = [
+            models.Index(fields=['product', 'is_approved']),
+            models.Index(fields=['rating']),
+            models.Index(fields=['created_at']),
+        ]
     
     def __str__(self):
         return f"Отзыв на {self.product.name} от {self.user}"
@@ -576,9 +962,30 @@ class ProductReview(models.Model):
         super().save(*args, **kwargs)
         
         # Пересчитываем средний рейтинг товара
+        self.update_product_rating()
+    
+    def update_product_rating(self):
+        """Обновить рейтинг товара"""
         reviews = self.product.reviews.filter(is_approved=True)
         if reviews.exists():
             avg_rating = reviews.aggregate(models.Avg('rating'))['rating__avg']
             self.product.rating = round(avg_rating, 2)
             self.product.total_reviews = reviews.count()
-            self.product.save()
+            self.product.save(update_fields=['rating', 'total_reviews'])
+    
+    @classmethod
+    def recalculate_all_ratings(cls):
+        """Пересчитать рейтинги для всех товаров"""
+        from django.db.models import Avg
+        
+        products = Product.objects.all()
+        for product in products:
+            reviews = product.reviews.filter(is_approved=True)
+            if reviews.exists():
+                avg_rating = reviews.aggregate(Avg('rating'))['rating__avg']
+                product.rating = round(avg_rating, 2)
+                product.total_reviews = reviews.count()
+            else:
+                product.rating = 0
+                product.total_reviews = 0
+            product.save(update_fields=['rating', 'total_reviews'])
