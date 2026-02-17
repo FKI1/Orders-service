@@ -2,6 +2,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from .settings.base import *
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-123')
@@ -71,3 +73,14 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True  # Только для разработки!
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'order_service',
+        'USER': 'postgres',
+        'PASSWORD': 'postgres',
+        'HOST': 'db',  
+        'PORT': '5432',
+    }
+}

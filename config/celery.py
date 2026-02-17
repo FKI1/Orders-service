@@ -1,10 +1,10 @@
 import os
 from celery import Celery
-from celery.schedules import crontad
+from celery.schedules import crontab
 from django.conf import settings
 
 # Устанавливаем переменную окружения для Django settings
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
 # Создаем экземпляр Celery
 app = Celery('order_service')
@@ -16,7 +16,7 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks(lambda: settings.INSTALLED_APPS)
 
 
-@app.task(bind=True, ignore_result=True)
+@app.task(bind=True)
 def debug_task(self):
     """
     Отладочная задача для проверки работы Celery.
