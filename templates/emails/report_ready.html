@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Отчет готов</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2c3e50;">✅ Отчет готов!</h2>
+        
+        <p>Здравствуйте, <strong>{{ user.full_name }}</strong>!</p>
+        
+        <p>Ваш отчет <strong>{{ report.get_report_type_display }}</strong> успешно сгенерирован.</p>
+        
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p><strong>📊 Информация об отчете:</strong></p>
+            <ul style="list-style: none; padding: 0;">
+                <li style="margin-bottom: 10px;">📋 Номер: {{ report.report_number }}</li>
+                <li style="margin-bottom: 10px;">📁 Формат: {{ report.get_format_display }}</li>
+                <li style="margin-bottom: 10px;">📅 Создан: {{ report.created_at|date:"d.m.Y H:i" }}</li>
+                <li style="margin-bottom: 10px;">⚡ Статус: {{ report.get_status_display }}</li>
+                <li style="margin-bottom: 10px;">📦 Размер: {{ report.file_size|filesizeformat }}</li>
+            </ul>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{{ site_url }}/api/reports/{{ report.id }}/download/" 
+               style="background-color: #3498db; color: white; padding: 12px 30px; 
+                      text-decoration: none; border-radius: 5px; font-size: 16px;">
+                📥 Скачать отчет
+            </a>
+        </div>
+        
+        <p style="color: #7f8c8d; font-size: 14px; margin-top: 30px;">
+            Отчет будет доступен для скачивания в течение 30 дней.<br>
+            Если у вас возникли проблемы со скачиванием, обратитесь к администратору.
+        </p>
+        
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        
+        <p style="color: #95a5a6; font-size: 12px;">
+            С уважением, команда Order Service<br>
+            <small>Это автоматическое письмо, не отвечайте на него.</small>
+        </p>
+    </div>
+</body>
+</html>
